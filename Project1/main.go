@@ -30,8 +30,9 @@ func main() {
 	// First-come, first-serve scheduling
 	FCFSSchedule(os.Stdout, "First-come, first-serve", processes)
 
-	//SJFSchedule(os.Stdout, "Shortest-job-first", processes)
-	//
+	// Shortest Job First - Preemptive
+	SJFSchedule(os.Stdout, "Shortest-job-first", processes)
+
 	//SJFPrioritySchedule(os.Stdout, "Priority", processes)
 	//
 	//RRSchedule(os.Stdout, "Round-robin", processes)
@@ -61,6 +62,11 @@ type (
 		ArrivalTime   int64
 		BurstDuration int64
 		Priority      int64
+	}
+	RunTime struct {
+		ProcessID  int64
+		remainTime int64
+		waitTime   int64
 	}
 	TimeSlice struct {
 		PID   int64
@@ -127,11 +133,135 @@ func FCFSSchedule(w io.Writer, title string, processes []Process) {
 	outputSchedule(w, schedule, aveWait, aveTurnaround, aveThroughput)
 }
 
+// SJFSchedule outputs a schedule of processes in a GANTT chart and a table of timing given:
+// • an output writer
+// • a title for the chart
+// • a slice of processes
+func SJFSchedule(w io.Writer, title string, processes []Process) {
+	var (
+		totalWait       float64
+		totalTurnaround float64
+		lastCompletion  float64
+		waitingTime     int64
+		totalTime       int64
+		activeProc      int64
+		procStart       int64
+		shortestAvail   int64
+		schedule        = make([][]string, len(processes))
+		SJFtracker      = make([]RunTime, len(processes))
+		gantt           = make([]TimeSlice, 0)
+	)
+
+	//Process list is sorted by arrival time
+
+	//Populate tracker and get total run time
+	for i := range processes {
+		SJFtracker[i].ProcessID = processes[i].ProcessID
+		SJFtracker[i].waitTime = 0
+		SJFtracker[i].remainTime = processes[i].BurstDuration
+		totalTime += processes[i].BurstDuration
+	}
+
+	//Set initial index and counter values
+	activeProc = 0
+	procStart = 0
+	shortestAvail = getShortest(SJFtracker, processes, 0)
+
+	//Set starting active process to the shortest process available at start
+	activeProc = shortestAvail
+
+	//Processor Loop
+	for t := 0; t <= int(totalTime); t++ {
+		for i := range processes {
+
+			//If a shorter process arrives on this clock cycle, switch to it
+			if (SJFtracker[i].remainTime < SJFtracker[activeProc].remainTime) && (t == int(processes[i].ArrivalTime)) {
+				shortestAvail = int64(i)
+			}
+			//Increment wait time if process has arrived and is not executing
+			if (i != int(activeProc) && i != int(shortestAvail)) && (SJFtracker[i].remainTime > 0) && (t > int(processes[i].ArrivalTime)) {
+				SJFtracker[i].waitTime += 1
+			}
+			//Check if the running process is completed, if so change to the new shortest job
+			if (i == int(activeProc)) && (SJFtracker[i].remainTime == 0) {
+				shortestAvail = getShortest(SJFtracker, processes, int64(t))
+			}
+			//Decrement the running process remainTime
+			if i == int(activeProc) {
+				SJFtracker[i].remainTime -= 1
+			}
+
+		}
+
+		if activeProc != shortestAvail || t == int(totalTime) {
+			gantt = append(gantt, TimeSlice{
+				PID:   processes[activeProc].ProcessID,
+				Start: procStart,
+				Stop:  int64(t),
+			})
+			procStart = int64(t)
+			activeProc = shortestAvail
+		}
+
+	}
+
+	//Tabulate final results
+	for i := range processes {
+
+		waitingTime = SJFtracker[i].waitTime
+		totalWait += float64(waitingTime)
+
+		turnaround := processes[i].BurstDuration + SJFtracker[i].waitTime
+		totalTurnaround += float64(turnaround)
+
+		completion := processes[i].BurstDuration + processes[i].ArrivalTime + waitingTime
+		lastCompletion = float64(completion)
+
+		schedule[i] = []string{
+			fmt.Sprint(processes[i].ProcessID),
+			fmt.Sprint(processes[i].Priority),
+			fmt.Sprint(processes[i].BurstDuration),
+			fmt.Sprint(processes[i].ArrivalTime),
+			fmt.Sprint(waitingTime),
+			fmt.Sprint(turnaround),
+			fmt.Sprint(completion),
+		}
+	}
+
+	count := float64(len(processes))
+	aveWait := totalWait / count
+	aveTurnaround := totalTurnaround / count
+	aveThroughput := count / lastCompletion
+
+	outputTitle(w, title)
+	outputGantt(w, gantt)
+	outputSchedule(w, schedule, aveWait, aveTurnaround, aveThroughput)
+}
+
 //func SJFPrioritySchedule(w io.Writer, title string, processes []Process) { }
-//
-//func SJFSchedule(w io.Writer, title string, processes []Process) { }
-//
+
 //func RRSchedule(w io.Writer, title string, processes []Process) { }
+
+//endregion
+
+//region calculation helpers
+
+// Returns the index of the shortest job that has an arrival time at or before the specified current time
+func getShortest(tracker []RunTime, processes []Process, current int64) (shortest int64) {
+	shortest = 0
+
+	for i := range processes {
+		if tracker[shortest].remainTime <= 0 {
+			shortest += 1
+			continue
+		}
+		if (tracker[i].remainTime < tracker[shortest].remainTime) && (processes[i].ArrivalTime <= current) && (tracker[i].remainTime > 0) && (tracker[shortest].remainTime > 0) {
+			shortest = int64(i)
+		}
+	}
+
+	return
+}
 
 //endregion
 
