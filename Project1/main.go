@@ -1,5 +1,8 @@
 package main
 
+//CSCE4600 - Project 1
+//SJF, SJFPriority, and RR by tat0154
+
 import (
 	"encoding/csv"
 	"errors"
