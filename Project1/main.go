@@ -36,7 +36,8 @@ func main() {
 	// Priority Schedule - Preemptive - ***SJF if Equal Priority***
 	SJFPrioritySchedule(os.Stdout, "Priority", processes)
 
-	//RRSchedule(os.Stdout, "Round-robin", processes)
+	// Round Robin Schedule
+	RRSchedule(os.Stdout, "Round-robin", processes)
 }
 
 func openProcessingFile(args ...string) (*os.File, func(), error) {
@@ -348,7 +349,123 @@ func SJFPrioritySchedule(w io.Writer, title string, processes []Process) {
 	outputSchedule(w, schedule, aveWait, aveTurnaround, aveThroughput)
 }
 
-//func RRSchedule(w io.Writer, title string, processes []Process) { }
+// RRSchedule outputs a schedule of processes in a GANTT chart and a table of timing given:
+// • an output writer
+// • a title for the chart
+// • a slice of processes
+func RRSchedule(w io.Writer, title string, processes []Process) {
+	var (
+		totalWait       float64
+		totalTurnaround float64
+		lastCompletion  float64
+		waitingTime     int64
+		totalTime       int64
+		activeProc      int64
+		procStart       int64
+		nextAvail       int64
+		timeQuantum     int64
+		schedule        = make([][]string, len(processes))
+		SJFtracker      = make([]RunTime, len(processes))
+		gantt           = make([]TimeSlice, 0)
+	)
+
+	//Process list is sorted by arrival time
+
+	//Populate tracker and get total run time
+	for i := range processes {
+		SJFtracker[i].ProcessID = processes[i].ProcessID
+		SJFtracker[i].waitTime = 0
+		SJFtracker[i].remainTime = processes[i].BurstDuration
+		totalTime += processes[i].BurstDuration
+	}
+
+	//Set initial index and counter values
+	activeProc = 0
+	procStart = 0
+	nextAvail = 0
+	timeQuantum = 4
+
+	//Set starting active process to the shortest process available at start
+	activeProc = nextAvail
+
+	//Processor Loop
+	for t := 1; t <= int(totalTime); t++ {
+		for i := range processes {
+			// If process has arrived and is not executing - increment wait time
+			if i != int(activeProc) && SJFtracker[i].remainTime > 0 && t > int(processes[i].ArrivalTime) {
+				SJFtracker[i].waitTime += 1
+				continue
+			}
+
+			//Check if the running process is completed -OR- if the current quantum has expired, if so change to the next job
+			if i == int(activeProc) {
+				SJFtracker[i].remainTime -= 1
+				timeQuantum -= 1
+
+				//Check if the running process is completed -OR- if the current quantum has expired, if so change to the next job
+				if SJFtracker[i].remainTime == 0 || timeQuantum == 0 {
+					nextAvail += 1
+				}
+			}
+
+		}
+
+		if activeProc != nextAvail || t == int(totalTime) {
+			gantt = append(gantt, TimeSlice{
+				PID:   processes[activeProc].ProcessID,
+				Start: procStart,
+				Stop:  int64(t),
+			})
+			procStart = int64(t)
+
+			timeQuantum = 4
+
+			if nextAvail >= int64(len(processes)) {
+				for i := range processes {
+					if SJFtracker[i].remainTime > 0 {
+						nextAvail = int64(i)
+						break
+					}
+				}
+			}
+
+			activeProc = nextAvail
+		}
+
+	}
+
+	//Tabulate final results
+	for i := range processes {
+
+		waitingTime = SJFtracker[i].waitTime
+		totalWait += float64(waitingTime)
+
+		turnaround := processes[i].BurstDuration + SJFtracker[i].waitTime
+		totalTurnaround += float64(turnaround)
+
+		completion := processes[i].BurstDuration + processes[i].ArrivalTime + waitingTime
+		lastCompletion = float64(completion)
+
+		schedule[i] = []string{
+			fmt.Sprint(processes[i].ProcessID),
+			fmt.Sprint(processes[i].Priority),
+			fmt.Sprint(processes[i].BurstDuration),
+			fmt.Sprint(processes[i].ArrivalTime),
+			fmt.Sprint(waitingTime),
+			fmt.Sprint(turnaround),
+			fmt.Sprint(completion),
+		}
+	}
+
+	count := float64(len(processes))
+	aveWait := totalWait / count
+	aveTurnaround := totalTurnaround / count
+	aveThroughput := count / lastCompletion
+
+	outputTitle(w, title)
+	outputGantt(w, gantt)
+	outputSchedule(w, schedule, aveWait, aveTurnaround, aveThroughput)
+}
 
 //endregion
 
